@@ -1,0 +1,26 @@
+﻿{
+  "symbol": "QQQ",
+  "history_path": "data/history_store.csv",
+  "strategy": {
+    "lookback": 252,
+    "q_gap": 0.8,
+    "q_early": 0.3,
+    "gap_buffer_bp": 2.0,
+    "early_buffer_bp": 2.0
+  },
+  "trade": {
+    "mode": "paper",
+    "cost_bps": 2.0,
+    "paper": {
+      "initial_cash": 10000.0
+    }
+  },
+  "telegram": {
+    "enabled": false,
+    "bot_token": "YOUR_BOT_TOKEN",
+    "chat_id": "YOUR_CHAT_ID"
+  },
+  "runtime": {
+    "ignore_late_guard": false
+  }
+}

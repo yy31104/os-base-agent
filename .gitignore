@@ -1,0 +1,28 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.venv/
+venv/
+env/
+.python-version
+
+# Runtime artifacts (keep private)
+data/
+logs/
+outputs/
+*.log
+
+# Local secrets
+config.json
+.env
+.env.*
+*.local.json
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
