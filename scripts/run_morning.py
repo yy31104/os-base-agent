@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import json
@@ -40,20 +40,23 @@ MORNING_CUTOFF = "09:45"
 
 def position_state(st) -> tuple[str, str]:
     if st is None:
-        return "UNKNOWN", "未知"
+        return "UNKNOWN", "unknown"
     if st.shares > 0:
-        return "HOLD", f"持有 {st.shares} 股"
-    return "FLAT", "空仓"
+        return "HOLD", f"holding {st.shares} shares"
+    return "FLAT", "flat"
 
 
 def account_line(st, mark_price: float, initial_cash: float, day_start_equity: float) -> str:
     if st is None:
-        return "仓位: UNKNOWN | 净值 N/A"
+        return "Position: UNKNOWN | Equity N/A"
     pos_code, _ = position_state(st)
     eq = equity(st, mark_price)
     cum_ret = eq / initial_cash - 1.0
     today_ret = 0.0 if day_start_equity <= 0 else eq / day_start_equity - 1.0
-    return f"仓位: {pos_code} {st.shares}股 | 净值 ${eq:,.2f} (累计{pct_text(cum_ret)} | 今日{pct_text(today_ret)})"
+    return (
+        f"Position: {pos_code} {st.shares} sh | Equity ${eq:,.2f} "
+        f"(Cum {pct_text(cum_ret)} | Today {pct_text(today_ret)})"
+    )
 
 
 def resolve_day_start_equity(
@@ -85,7 +88,10 @@ def signal_compare_line(
     early_gate = thr_e - early_buf_bp * 1e-4
     gap_cmp = ">=" if gap >= gap_gate else "<"
     early_cmp = "<=" if early <= early_gate else ">"
-    return f"信号: gap {gap*100:+.3f}% {gap_cmp} {gap_gate*100:+.3f}% | early {early*100:+.3f}% {early_cmp} {early_gate*100:+.3f}%"
+    return (
+        f"Signal: gap {gap*100:+.3f}% {gap_cmp} {gap_gate*100:+.3f}% | "
+        f"early {early*100:+.3f}% {early_cmp} {early_gate*100:+.3f}%"
+    )
 
 
 def build_open_msg(
@@ -98,14 +104,14 @@ def build_open_msg(
     note: str | None = None,
 ) -> str:
     lines = [
-        f"【OS_base 开盘】{symbol} {date_key}",
-        f"结论: {conclusion}",
+        f"[OS_base Open] {symbol} {date_key}",
+        f"Conclusion: {conclusion}",
         account,
         signal_line,
         price_line,
     ]
     if note:
-        lines.append(f"备注: {note}")
+        lines.append(f"Note: {note}")
     return "\n".join(lines)
 
 
@@ -120,14 +126,14 @@ def build_exec_msg(
     note: str | None = None,
 ) -> str:
     lines = [
-        f"【OS_base {phase}】{symbol} {date_key}",
-        f"动作: {action_line}",
+        f"[OS_base {phase}] {symbol} {date_key}",
+        f"Action: {action_line}",
         account,
-        f"执行价: {exec_price_line}",
-        f"原因: {reason_line}",
+        f"Exec price: {exec_price_line}",
+        f"Reason: {reason_line}",
     ]
     if note:
-        lines.append(f"备注: {note}")
+        lines.append(f"Note: {note}")
     return "\n".join(lines)
 
 
@@ -164,7 +170,7 @@ def wait_for_snapshot(symbol: str, target_date: date, timeout_sec: int, poll_sec
         else:
             last_reason = "no_today_rth_bars"
         if time.time() >= deadline:
-            raise RuntimeError(f"等待行情超时: {last_reason}")
+            raise RuntimeError(f"Market data wait timeout: {last_reason}")
         time.sleep(poll_sec)
 
 
@@ -311,20 +317,20 @@ def main() -> None:
     trading_day, closed_reason = is_nyse_trading_day(now.date())
     if not trading_day:
         skip_code = "SKIP_MARKET_CLOSED"
-        skip_reason = "今天非交易日，跳过开盘评估与09:40执行。"
+        skip_reason = "Non-trading day. Skip open assessment and 09:40 execution."
         if closed_reason == "weekend":
-            skip_reason = "今天周末休市，跳过开盘评估与09:40执行。"
+            skip_reason = "Weekend market closed. Skip open assessment and 09:40 execution."
         elif closed_reason == "nyse_holiday":
-            skip_reason = "今天美股休市，跳过开盘评估与09:40执行。"
+            skip_reason = "US market holiday closed. Skip open assessment and 09:40 execution."
 
         if date_key not in sent["morning"]:
             msg = build_open_msg(
                 symbol=symbol,
                 date_key=date_key,
-                conclusion=f"市场状态: 休市 | 动作={skip_code}",
+                conclusion=f"Market status: closed | action={skip_code}",
                 account=account_line(st, mark_price, initial_cash, day_start_equity),
-                signal_line="信号: 非交易日不计算 gap/early/risk_day",
-                price_line="价格: N/A（非交易日）",
+                signal_line="Signal: gap/early/risk_day not computed on non-trading day",
+                price_line="Price: N/A (non-trading day)",
                 note=skip_reason,
             )
             sent_ok = safe_tg_send(tg, msg)
@@ -353,7 +359,7 @@ def main() -> None:
                 "intraday_exec_price_source": None,
                 "position_after_0940": position_state(st)[0],
                 "close_plan_code": "NONE",
-                "close_plan_desc": "非交易日，无收盘动作",
+                "close_plan_desc": "non-trading day, no close action",
                 "updated_at": pd.Timestamp.now(tz=NY).isoformat(),
             }
         )
@@ -364,15 +370,15 @@ def main() -> None:
         _, open_930, close_935, _ = wait_for_snapshot(symbol, now.date(), args.timeout_sec, args.poll_sec)
     except RuntimeError as e:
         skip_code = "SKIP_MARKET_CLOSED_OR_NO_DATA"
-        skip_reason = f"未拿到当日09:30/09:35分钟数据（{e}），跳过开盘评估与09:40执行。"
+        skip_reason = f"Missing 09:30/09:35 bars for today ({e}). Skip open assessment and 09:40 execution."
         if date_key not in sent["morning"]:
             msg = build_open_msg(
                 symbol=symbol,
                 date_key=date_key,
-                conclusion=f"市场状态: 休市/缺数据 | 动作={skip_code}",
+                conclusion=f"Market status: closed_or_no_data | action={skip_code}",
                 account=account_line(st, mark_price, initial_cash, day_start_equity),
-                signal_line="信号: 今日不计算风险日",
-                price_line="价格: N/A（无当日分钟数据）",
+                signal_line="Signal: risk_day not computed today",
+                price_line="Price: N/A (no intraday data for today)",
                 note=skip_reason,
             )
             sent_ok = safe_tg_send(tg, msg)
@@ -401,7 +407,7 @@ def main() -> None:
                 "intraday_exec_price_source": None,
                 "position_after_0940": position_state(st)[0],
                 "close_plan_code": "NONE",
-                "close_plan_desc": "无当日分钟数据，跳过",
+                "close_plan_desc": "no intraday data for today, skipped",
                 "updated_at": pd.Timestamp.now(tz=NY).isoformat(),
             }
         )
@@ -421,7 +427,7 @@ def main() -> None:
         pc = float(fallback_pc)
         pc_src = f"fallback_yfinance({local_src})"
     else:
-        raise RuntimeError("无法获取 prev_close（本地缺失且 yfinance 也失败）。")
+        raise RuntimeError("Unable to get prev_close (local missing and yfinance fallback failed).")
 
     trade_blocked = local_pc is None
     late_run_detected = is_late_run(now_hhmm)
@@ -439,24 +445,24 @@ def main() -> None:
 
     if trade_blocked:
         intraday_code = "NO_TRADE_MISSING_PREV_CLOSE"
-        intraday_desc = "缺少可靠昨收，不执行09:40交易"
+        intraday_desc = "missing reliable prev_close, skip 09:40 execution"
         close_plan_code = "NONE"
-        close_plan_desc = "保持当前仓位，不触发补执行"
+        close_plan_desc = "keep current position; no catch-up execution"
     elif late_run:
         intraday_code = "LATE_NO_TRADE"
-        intraday_desc = "错过09:40窗口，不补执行"
+        intraday_desc = "missed 09:40 window; no catch-up execution"
         close_plan_code = "NONE"
-        close_plan_desc = "继续当前仓位，不补执行"
+        close_plan_desc = "keep current position; no catch-up execution"
     elif risk:
         intraday_code = "SELL_TO_FLAT"
-        intraday_desc = "09:40 卖出到空仓"
+        intraday_desc = "sell to flat at 09:40"
         close_plan_code = "BUYBACK_OR_STAY_FLAT"
-        close_plan_desc = "15:59 判断买回或空仓隔夜"
+        close_plan_desc = "decide buyback or stay flat at 15:59"
     else:
         intraday_code = "HOLD"
-        intraday_desc = "09:40 不卖出，继续持有"
+        intraday_desc = "no sell at 09:40; keep holding"
         close_plan_code = "NONE"
-        close_plan_desc = "继续持仓隔夜（无需买回）"
+        close_plan_desc = "hold overnight (no buyback needed)"
 
     if date_key not in sent["morning"]:
         note = None
@@ -464,29 +470,29 @@ def main() -> None:
             bought = buy_max(st, open_930, cost_bps)
             save_state(args.state, st)
             if bought > 0:
-                note = f"开盘补仓: 买入 {bought} 股 @ {open_930:.2f}"
+                note = f"Open rebalance: bought {bought} shares @ {open_930:.2f}"
             else:
-                note = "开盘补仓失败（现金不足买1股）"
+                note = "Open rebalance failed (insufficient cash for 1 share)"
 
         if intraday_code == "SELL_TO_FLAT":
-            conclusion = "风险日=是 -> 09:40卖出"
+            conclusion = "risk_day=YES -> sell at 09:40"
         elif intraday_code == "HOLD":
-            conclusion = "风险日=否 -> 09:40不卖（继续持有）"
+            conclusion = "risk_day=NO -> no sell at 09:40 (keep holding)"
         elif intraday_code == "LATE_NO_TRADE":
-            conclusion = f"风险日={'是' if risk else '否'} -> LATE_NO_TRADE（错过窗口不补执行）"
+            conclusion = f"risk_day={'YES' if risk else 'NO'} -> LATE_NO_TRADE (missed window; no catch-up)"
         elif intraday_code == "NO_TRADE_MISSING_PREV_CLOSE":
-            conclusion = f"风险日={'是' if risk else '否'} -> NO_TRADE_MISSING_PREV_CLOSE"
+            conclusion = f"risk_day={'YES' if risk else 'NO'} -> NO_TRADE_MISSING_PREV_CLOSE"
         else:
-            conclusion = f"风险日={'是' if risk else '否'} -> {intraday_code}"
+            conclusion = f"risk_day={'YES' if risk else 'NO'} -> {intraday_code}"
 
-        src_tag = "本地昨收" if pc_src.startswith("local_last_close") else "回退昨收"
-        reason_parts = [f"昨收={pc:.2f}（{src_tag}）"]
+        src_tag = "local prev_close" if pc_src.startswith("local_last_close") else "fallback prev_close"
+        reason_parts = [f"prev_close={pc:.2f} ({src_tag})"]
         if pre_refresh_note:
-            reason_parts.append(f"数据预更新: {pre_refresh_note}")
+            reason_parts.append(f"pre-refresh: {pre_refresh_note}")
         if trade_blocked:
-            reason_parts.append("缺少可靠昨收，今日仅提示不交易")
+            reason_parts.append("missing reliable prev_close; signal-only today")
         if late_run:
-            reason_parts.append(f"晚于{MORNING_CUTOFF}ET，仅提示不交易")
+            reason_parts.append(f"later than {MORNING_CUTOFF} ET; signal-only, no trade")
         if note is not None:
             reason_parts.append(note)
 
@@ -496,7 +502,7 @@ def main() -> None:
             conclusion=conclusion,
             account=account_line(st, close_935, initial_cash, day_start_equity),
             signal_line=signal_line,
-            price_line=f"价格: 昨收 {pc:.2f} | 09:30 {open_930:.2f} | 09:35 {close_935:.2f}",
+            price_line=f"Price: prev_close {pc:.2f} | 09:30 {open_930:.2f} | 09:35 {close_935:.2f}",
             note=" | ".join(reason_parts),
         )
         sent_ok = safe_tg_send(tg, msg)
@@ -544,20 +550,20 @@ def main() -> None:
 
     if trade_blocked or late_run:
         reason_line = (
-            "缺少可靠昨收，按规则不交易"
+            "missing reliable prev_close; no trade by rule"
             if trade_blocked
-            else f"当前运行时间 {now_hhmm}ET，已晚于{MORNING_CUTOFF}ET，按规则不补交易"
+            else f"current run time {now_hhmm} ET is later than {MORNING_CUTOFF} ET; no catch-up trade by rule"
         )
         phase = f"LATE {now_hhmm}ET" if late_run else "09:40"
         msg = build_exec_msg(
             symbol=symbol,
             date_key=date_key,
             phase=phase,
-            action_line=f"无（{intraday_code}）",
+            action_line=f"None ({intraday_code})",
             account=account_line(st, close_935, initial_cash, day_start_equity),
-            exec_price_line="—（未下单）",
+            exec_price_line="-- (no order)",
             reason_line=reason_line,
-            note=f"信号参考: {signal_line}",
+            note=f"Signal reference: {signal_line}",
         )
         sent_ok = safe_tg_send(tg, msg)
         print(msg, flush=True)
@@ -575,11 +581,11 @@ def main() -> None:
             symbol=symbol,
             date_key=date_key,
             phase="09:40",
-            action_line="无（NO_DATA）",
+            action_line="None (NO_DATA)",
             account=account_line(st, close_935, initial_cash, day_start_equity),
-            exec_price_line="—（未下单）",
-            reason_line=f"09:40附近无分钟数据，按规则不交易：{e}",
-            note=f"信号参考: {signal_line}",
+            exec_price_line="-- (no order)",
+            reason_line=f"No minute bar near 09:40, no trade by rule: {e}",
+            note=f"Signal reference: {signal_line}",
         )
         sent_ok = safe_tg_send(tg, msg)
         print(msg, flush=True)
@@ -602,31 +608,31 @@ def main() -> None:
         px = float(intr2["close"].iloc[-1])
         px_src = "latest"
 
-    action_line = "无"
-    exec_price_line = "—（未下单）"
+    action_line = "None"
+    exec_price_line = "-- (no order)"
     if risk:
         if st is not None and st.shares > 0:
             sold = sell_all(st, px, cost_bps)
             save_state(args.state, st)
             intraday_code = "SELL_TO_FLAT"
-            intraday_desc = "已在09:40卖出"
-            action_line = f"卖出 {sold} 股（{intraday_code}）"
-            exec_price_line = f"{px:.2f}（{px_src}）"
-            action_reason = "今日风险日，09:40按规则先卖出降风险"
+            intraday_desc = "sold at 09:40"
+            action_line = f"Sold {sold} shares ({intraday_code})"
+            exec_price_line = f"{px:.2f} ({px_src})"
+            action_reason = "risk_day=YES, so sell first at 09:40 to reduce risk"
         else:
             intraday_code = "NO_POSITION"
-            intraday_desc = "无仓可卖"
-            action_line = f"无（{intraday_code}）"
-            action_reason = "今日风险日，但当前无仓位，无需卖出"
+            intraday_desc = "no position to sell"
+            action_line = f"None ({intraday_code})"
+            action_reason = "risk_day=YES, but there is no position to sell"
         close_plan_code = "BUYBACK_OR_STAY_FLAT"
-        close_plan_desc = "15:59 根据尾盘强弱决定"
+        close_plan_desc = "decide by late-session strength at 15:59"
     else:
         intraday_code = "HOLD"
-        intraday_desc = "09:40 不卖出，继续持有"
+        intraday_desc = "no sell at 09:40; keep holding"
         close_plan_code = "NONE"
-        close_plan_desc = "继续持仓隔夜（无需买回）"
-        action_line = f"无（{intraday_code}）"
-        action_reason = "今日非风险日，09:40不清仓"
+        close_plan_desc = "hold overnight (no buyback needed)"
+        action_line = f"None ({intraday_code})"
+        action_reason = "risk_day=NO, so no liquidation at 09:40"
 
     msg = build_exec_msg(
         symbol=symbol,
@@ -635,8 +641,8 @@ def main() -> None:
         action_line=action_line,
         account=account_line(st, px, initial_cash, day_start_equity),
         exec_price_line=exec_price_line,
-        reason_line=f"risk_day={'是' if risk else '否'} | {action_reason}",
-        note=f"信号参考: {signal_line}",
+        reason_line=f"risk_day={'YES' if risk else 'NO'} | {action_reason}",
+        note=f"Signal reference: {signal_line}",
     )
     sent_ok = safe_tg_send(tg, msg)
     print(msg, flush=True)

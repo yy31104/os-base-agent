@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import json
@@ -42,19 +42,19 @@ CLOSE_FINALIZE_AT = "16:05"
 
 def position_state(st) -> tuple[str, str]:
     if st is None:
-        return "UNKNOWN", "未知"
+        return "UNKNOWN", "unknown"
     if st.shares > 0:
-        return "HOLD", f"持有 {st.shares} 股"
-    return "FLAT", "空仓"
+        return "HOLD", f"holding {st.shares} shares"
+    return "FLAT", "flat"
 
 
 def account_line(st, mark_price: float, initial_cash: float, day_start_equity: float) -> str:
     if st is None:
-        return "净值 N/A"
+        return "Equity N/A"
     eq = equity(st, mark_price)
     cum_ret = eq / initial_cash - 1.0
     today_ret = 0.0 if day_start_equity <= 0 else eq / day_start_equity - 1.0
-    return f"净值 ${eq:,.2f} (累计{pct_text(cum_ret)} | 今日{pct_text(today_ret)})"
+    return f"Equity ${eq:,.2f} (Cum {pct_text(cum_ret)} | Today {pct_text(today_ret)})"
 
 
 def resolve_day_start_equity(
@@ -87,7 +87,7 @@ def signal_compare_line(
     gap_cmp = ">=" if gap >= gap_gate else "<"
     early_cmp = "<=" if early <= early_gate else ">"
     return (
-        f"信号: gap {gap*100:+.3f}% {gap_cmp} {gap_gate*100:+.3f}% | "
+        f"Signal: gap {gap*100:+.3f}% {gap_cmp} {gap_gate*100:+.3f}% | "
         f"early {early*100:+.3f}% {early_cmp} {early_gate*100:+.3f}%"
     )
 
@@ -103,15 +103,15 @@ def build_close_msg(
     note: str | None = None,
 ) -> str:
     lines = [
-        f"【OS_base 收盘】{symbol} {date_key}",
-        f"最终: {final_line}",
-        f"触发: {trigger_line}",
+        f"[OS_base Close] {symbol} {date_key}",
+        f"Final: {final_line}",
+        f"Trigger: {trigger_line}",
         close_line,
         net_line,
         record_line,
     ]
     if note:
-        lines.append(f"备注: {note}")
+        lines.append(f"Note: {note}")
     return "\n".join(lines)
 
 
@@ -148,7 +148,7 @@ def wait_for_snapshot(symbol: str, target_date: date, timeout_sec: int, poll_sec
         else:
             last_reason = "no_today_rth_bars"
         if time.time() >= deadline:
-            raise RuntimeError(f"等待行情超时: {last_reason}")
+            raise RuntimeError(f"Market data wait timeout: {last_reason}")
         time.sleep(poll_sec)
 
 
@@ -203,24 +203,24 @@ def main() -> None:
     trading_day, closed_reason = is_nyse_trading_day(now0.date())
     if not trading_day:
         pos_code, pos_desc = position_state(st)
-        final_line = f"隔夜 {pos_code}（{pos_desc}）"
-        trigger_line = "非交易日 -> 跳过收盘策略"
-        note = "非交易日不做收盘执行/复核。"
+        final_line = f"Overnight {pos_code} ({pos_desc})"
+        trigger_line = "Non-trading day -> skip close logic"
+        note = "No close execution/review on non-trading day."
         if closed_reason == "weekend":
-            trigger_line = "周末休市 -> 跳过收盘策略"
-            note = "周末不做收盘执行/复核。"
+            trigger_line = "Weekend market closed -> skip close logic"
+            note = "No close execution/review on weekends."
         elif closed_reason == "nyse_holiday":
-            trigger_line = "美股休市 -> 跳过收盘策略"
-            note = "美股休市日不做收盘执行/复核。"
+            trigger_line = "US market holiday closed -> skip close logic"
+            note = "No close execution/review on US market holidays."
 
         msg = build_close_msg(
             symbol=symbol,
             date_key=date_key0,
             final_line=final_line,
             trigger_line=trigger_line,
-            close_line="收盘: N/A（非交易日）",
+            close_line="Close: N/A (non-trading day)",
             net_line=account_line(st, mark_price0, initial_cash, day_start_equity0),
-            record_line="记录: 非交易日，不写入 history_store",
+            record_line="Record: non-trading day, not written to history_store",
             note=note,
         )
         sent_ok = safe_tg_send(tg, msg)
@@ -253,11 +253,11 @@ def main() -> None:
         msg = build_close_msg(
             symbol=symbol,
             date_key=date_key0,
-            final_line=f"隔夜 {pos_code}（{pos_desc}）",
-            trigger_line="休市/无当日分钟数据 -> 跳过收盘策略",
-            close_line="收盘: N/A（无当日数据）",
+            final_line=f"Overnight {pos_code} ({pos_desc})",
+            trigger_line="Market closed or no intraday data -> skip close logic",
+            close_line="Close: N/A (no intraday data for today)",
             net_line=account_line(st, mark_price0, initial_cash, day_start_equity0),
-            record_line="记录: 未写入 history_store",
+            record_line="Record: not written to history_store",
             note=str(e),
         )
         sent_ok = safe_tg_send(tg, msg)
@@ -297,7 +297,7 @@ def main() -> None:
         pc = float(fallback_pc)
         pc_src = f"fallback_yfinance({local_src})"
     else:
-        raise RuntimeError("无法获取 prev_close（本地缺失且 yfinance 也失败）。")
+        raise RuntimeError("Unable to get prev_close (local missing and yfinance fallback failed).")
     trade_blocked = local_pc is None
 
     hist = load_hist(hist_path)
@@ -333,16 +333,16 @@ def main() -> None:
     bb = buyback(cc_ret_exec) if risk else False
 
     close_code = "NONE"
-    close_desc = "继续当前仓位"
+    close_desc = "keep current position"
     if late_run:
         close_code = "LATE_NO_TRADE"
-        close_desc = "错过收盘前窗口，不补执行"
+        close_desc = "missed pre-close window; no catch-up execution"
     elif trade_blocked:
         close_code = "NO_TRADE_MISSING_PREV_CLOSE"
-        close_desc = "缺少可靠昨收，不执行买回"
+        close_desc = "missing reliable prev_close, skip buyback"
     elif not risk:
         close_code = "NONE"
-        close_desc = "继续持仓隔夜（无需买回）"
+        close_desc = "hold overnight (no buyback needed)"
     else:
         if st is not None and st.shares == 0:
             if bb:
@@ -350,16 +350,16 @@ def main() -> None:
                 save_state(args.state, st)
                 if bought > 0:
                     close_code = "BUYBACK"
-                    close_desc = "已买回，恢复隔夜持仓"
+                    close_desc = "buyback executed, restore overnight hold"
                 else:
                     close_code = "BUYBACK_SKIPPED"
-                    close_desc = "触发买回但未成交"
+                    close_desc = "buyback triggered but not filled"
             else:
                 close_code = "STAY_FLAT"
-                close_desc = "保持空仓隔夜"
+                close_desc = "stay flat overnight"
         elif st is not None and st.shares > 0:
             close_code = "NONE"
-            close_desc = "已持仓，继续持仓隔夜"
+            close_desc = "already holding, continue overnight"
 
     wait_until(CLOSE_FINALIZE_AT, args.poll_sec)
     _, _, _, final_close = wait_for_snapshot(symbol, now_exec.date(), 1200, args.poll_sec)
@@ -370,39 +370,39 @@ def main() -> None:
 
     pos_code, pos_desc = position_state(st)
     if close_code in {"NONE", "BUYBACK"} and pos_code == "HOLD":
-        final_line = f"隔夜 HOLD（{pos_desc}）"
+        final_line = f"Overnight HOLD ({pos_desc})"
     elif pos_code == "FLAT":
-        final_line = "隔夜 FLAT（空仓）"
+        final_line = "Overnight FLAT (flat)"
     else:
-        final_line = f"隔夜 {pos_code}（{pos_desc}）"
+        final_line = f"Overnight {pos_code} ({pos_desc})"
 
     if close_code == "NONE" and not risk:
-        trigger_line = "非风险日 -> 无需买回（本来就持仓）"
+        trigger_line = "Non-risk day -> no buyback needed (already holding)"
     elif close_code == "BUYBACK":
-        trigger_line = "风险日且尾盘不弱 -> 收盘前买回"
+        trigger_line = "Risk day with non-weak close -> buy back before close"
     elif close_code == "STAY_FLAT":
-        trigger_line = "风险日且尾盘偏弱 -> 不买回，空仓隔夜"
+        trigger_line = "Risk day with weak close -> no buyback, stay flat overnight"
     elif close_code == "LATE_NO_TRADE":
-        trigger_line = "错过收盘前窗口 -> 不补交易，仅复核"
+        trigger_line = "Missed pre-close window -> no catch-up trade, review only"
     elif close_code == "NO_TRADE_MISSING_PREV_CLOSE":
-        trigger_line = "昨收不可用 -> 不执行买回"
+        trigger_line = "prev_close unavailable -> skip buyback"
     else:
         trigger_line = close_desc
 
     note = None
     if late_run and not ignore_late_guard:
-        note = f"晚于{CLOSE_EXEC_LATEST}ET不补交易，仅复核。"
+        note = f"Later than {CLOSE_EXEC_LATEST} ET: no catch-up trade, review only."
     if late_run_detected and ignore_late_guard:
-        note = f"晚运行({now_exec_hhmm}ET)但已按原规则执行（ignore_late_guard=true）。"
+        note = f"Late run ({now_exec_hhmm} ET) but executed by rule (ignore_late_guard=true)."
 
     msg = build_close_msg(
         symbol=symbol,
         date_key=date_key,
         final_line=final_line,
         trigger_line=trigger_line,
-        close_line=f"收盘: {final_close:.2f} | cc_ret {cc_ret_final*100:+.2f}%",
+        close_line=f"Close: {final_close:.2f} | cc_ret {cc_ret_final*100:+.2f}%",
         net_line=f"{account_line(st, final_close, initial_cash, day_start_equity)} | prev_close {pc:.2f}",
-        record_line=f"记录: 已写入 history_store(gap/early) | {signal_line}",
+        record_line=f"Record: written to history_store (gap/early) | {signal_line}",
         note=note,
     )
     sent_ok = safe_tg_send(tg, msg)

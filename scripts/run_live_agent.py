@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import json
@@ -70,23 +70,23 @@ def mark_sent(path: str, state: dict[str, set[str]], key: str, date_key: str) ->
 
 def position_state(st) -> tuple[str, str]:
     if st is None:
-        return "UNKNOWN", "未知"
+        return "UNKNOWN", "unknown"
     if st.shares > 0:
-        return "HOLD", f"持有 {st.shares} 股"
-    return "FLAT", "空仓"
+        return "HOLD", f"holding {st.shares} shares"
+    return "FLAT", "flat"
 
 
 def paper_lines(st, mark_price: float, initial_cash: float, day_start_equity: float) -> list[str]:
     if st is None:
-        return ["账户模式: 非 paper 模式"]
+        return ["Account mode: non-paper mode"]
     eq = equity(st, mark_price)
     cum_ret = eq / initial_cash - 1.0
     today_ret = 0.0 if day_start_equity <= 0 else eq / day_start_equity - 1.0
     return [
-        f"账户净值: ${eq:,.2f}",
-        f"累计收益: {pct_text(cum_ret)}",
-        f"今日贡献: {pct_text(today_ret)}",
-        f"现金/持仓: ${st.cash:,.2f} / {st.shares} 股",
+        f"Account equity: ${eq:,.2f}",
+        f"Cumulative return: {pct_text(cum_ret)}",
+        f"Today return: {pct_text(today_ret)}",
+        f"Cash/Position: ${st.cash:,.2f} / {st.shares} shares",
     ]
 
 
@@ -106,14 +106,17 @@ def risk_reason_lines(
     if risk:
         triggers: list[str] = []
         if gap_hit:
-            triggers.append("开盘跳空偏高")
+            triggers.append("high opening gap")
         if early_hit:
-            triggers.append("前5分钟走弱")
-        why = "、".join(triggers) if triggers else "触发风控线"
-        lead = f"今天是风险日，因为{why}。"
+            triggers.append("weak first 5-minute move")
+        why = ", ".join(triggers) if triggers else "a risk threshold was triggered"
+        lead = f"Today is a risk day because {why}."
     else:
-        lead = "今天不是风险日，因为开盘和前5分钟走势都没有越过风控线。"
-    detail = f"参考值: gap={gap*100:.3f}% (线 {gap_gate*100:.3f}%), early_ret={early*100:.3f}% (线 {early_gate*100:.3f}%)"
+        lead = "Today is not a risk day because neither open nor first 5-minute move crossed the risk line."
+    detail = (
+        f"Reference: gap={gap*100:.3f}% (line {gap_gate*100:.3f}%), "
+        f"early_ret={early*100:.3f}% (line {early_gate*100:.3f}%)"
+    )
     return [lead, detail]
 
 
@@ -126,16 +129,16 @@ def build_msg(
     action_lines: list[str],
     reason_lines: list[str],
 ) -> str:
-    lines = [f"【OS_base {title}】{symbol} {date_key}", "", "状态摘要:"]
+    lines = [f"[OS_base {title}] {symbol} {date_key}", "", "Status summary:"]
     lines.extend(decision_lines)
     lines.append("")
-    lines.append("收益:")
+    lines.append("Performance:")
     lines.extend(profit_lines)
     lines.append("")
-    lines.append("执行与改动:")
+    lines.append("Execution & changes:")
     lines.extend(action_lines)
     lines.append("")
-    lines.append("原因(通俗):")
+    lines.append("Reason (plain English):")
     lines.extend(reason_lines)
     return "\n".join(lines)
 
@@ -177,9 +180,9 @@ def main():
     day_ref = None
     day_start_equity = initial_cash
     day_intraday_code = "PENDING"
-    day_intraday_desc = "待 09:40 执行"
+    day_intraday_desc = "pending 09:40 execution"
     day_close_code = "PENDING"
-    day_close_desc = "待 16:05 判断"
+    day_close_desc = "pending 16:05 close decision"
 
     while True:
         now = pd.Timestamp.now(tz=NY)
@@ -214,48 +217,48 @@ def main():
                 day_ref = date
                 day_start_equity = equity(st, pc)
                 day_intraday_code = "PENDING"
-                day_intraday_desc = "待 09:40 执行"
+                day_intraday_desc = "pending 09:40 execution"
                 day_close_code = "PENDING"
-                day_close_desc = "待 16:05 判断"
+                day_close_desc = "pending 16:05 close decision"
 
         if hhmm >= "09:36" and date_key not in sent["morning"]:
-            action_lines = ["策略参数改动: 无（沿用 config.json）"]
-            open_reason = "当前不是 paper 模式，今天不做建仓。"
+            action_lines = ["Strategy config change: none (using config.json)"]
+            open_reason = "Current mode is non-paper, so no open build-in today."
             bought = 0
             if st is not None and st.shares == 0:
                 bought = buy_max(st, open_930, cost_bps)
                 save_state(args.state, st)
                 if bought > 0:
-                    action_lines.append(f"开盘动作: 买入 {bought} 股 @ {open_930:.2f}")
-                    open_reason = "启动时是空仓，所以按 paper 规则先尽量建仓。"
+                    action_lines.append(f"Open action: bought {bought} shares @ {open_930:.2f}")
+                    open_reason = "Started flat, so paper rule builds position at open."
                 else:
-                    action_lines.append("开盘动作: 未成交（现金不足或价格异常）")
-                    open_reason = "虽然计划建仓，但可用现金不足以买入 1 股。"
+                    action_lines.append("Open action: no fill (insufficient cash or invalid price)")
+                    open_reason = "Build-in was planned, but cash was insufficient for 1 share."
             elif st is not None:
-                action_lines.append(f"开盘动作: 无（已有持仓 {st.shares} 股）")
-                open_reason = "已经有仓位，为避免重复下单，开盘不再买入。"
+                action_lines.append(f"Open action: none (already holding {st.shares} shares)")
+                open_reason = "Already holding position, so no duplicate open order."
 
             if risk:
                 day_intraday_code = "SELL_TO_FLAT"
-                day_intraday_desc = "09:40 卖出到空仓"
+                day_intraday_desc = "sell to flat at 09:40"
                 day_close_code = "BUYBACK_OR_STAY_FLAT"
-                day_close_desc = "16:05 再判断买回还是空仓"
+                day_close_desc = "re-evaluate buyback vs flat at 16:05"
             else:
                 day_intraday_code = "HOLD"
-                day_intraday_desc = "09:40 不卖出，继续持有"
+                day_intraday_desc = "no sell at 09:40, keep holding"
                 day_close_code = "NONE"
-                day_close_desc = "非风险日，无需买回"
+                day_close_desc = "non-risk day, no buyback needed"
 
             pos_code, pos_desc = position_state(st)
             decision_lines = [
-                f"风险日: {'是' if risk else '否'}",
-                f"盘中动作(计划): {day_intraday_code}（{day_intraday_desc}）",
-                f"收盘动作(计划): {day_close_code}（{day_close_desc}）",
-                f"当前仓位: {pos_code}（{pos_desc}）",
+                f"Risk day: {'YES' if risk else 'NO'}",
+                f"Intraday action (plan): {day_intraday_code} ({day_intraday_desc})",
+                f"Close action (plan): {day_close_code} ({day_close_desc})",
+                f"Current position: {pos_code} ({pos_desc})",
             ]
             reason_lines = base_reasons + [open_reason]
             msg = build_msg(
-                "09:36 开盘评估",
+                "09:36 Open assessment",
                 symbol,
                 date_key,
                 decision_lines,
@@ -269,41 +272,41 @@ def main():
 
         if hhmm >= "09:40" and date_key not in sent["exit"]:
             px = float(intr["close"].iloc[-1])
-            action_lines = ["策略参数改动: 无（沿用 config.json）"]
-            action_reason = "当前不是 paper 模式，09:40 不执行交易。"
+            action_lines = ["Strategy config change: none (using config.json)"]
+            action_reason = "Current mode is non-paper, so no 09:40 execution."
             if risk:
                 if st is not None and st.shares > 0:
                     sold = sell_all(st, px, cost_bps)
                     save_state(args.state, st)
                     day_intraday_code = "SELL_TO_FLAT"
-                    day_intraday_desc = "已在 09:40 卖出"
-                    action_lines.append(f"09:40 动作: 卖出 {sold} 股 @ {px:.2f}")
-                    action_reason = "今天是风险日，所以 09:40 先卖出降风险。"
+                    day_intraday_desc = "sold at 09:40"
+                    action_lines.append(f"09:40 action: sold {sold} shares @ {px:.2f}")
+                    action_reason = "Today is a risk day, so we sold at 09:40 to reduce risk."
                 else:
                     day_intraday_code = "NO_POSITION"
-                    day_intraday_desc = "无仓可卖"
-                    action_lines.append(f"09:40 动作: 无下单（当前无持仓），观察价 {px:.2f}")
-                    action_reason = "今天是风险日，但你当时没有仓位，所以无需卖出。"
+                    day_intraday_desc = "no position to sell"
+                    action_lines.append(f"09:40 action: no order (no position), observed {px:.2f}")
+                    action_reason = "Today is a risk day, but there was no position to sell."
                 day_close_code = "BUYBACK_OR_STAY_FLAT"
-                day_close_desc = "16:05 根据收盘强弱决定"
+                day_close_desc = "decide by close strength at 16:05"
             else:
                 day_intraday_code = "HOLD"
-                day_intraday_desc = "09:40 不卖出，继续持有"
+                day_intraday_desc = "no sell at 09:40, keep holding"
                 day_close_code = "NONE"
-                day_close_desc = "非风险日，无需买回"
-                action_lines.append(f"09:40 动作: 不卖出，继续持有，观察价 {px:.2f}")
-                action_reason = "今天不是风险日，所以 09:40 不清仓。"
+                day_close_desc = "non-risk day, no buyback needed"
+                action_lines.append(f"09:40 action: no sell, keep holding, observed {px:.2f}")
+                action_reason = "Today is not a risk day, so we do not liquidate at 09:40."
 
             pos_code, pos_desc = position_state(st)
             decision_lines = [
-                f"风险日: {'是' if risk else '否'}",
-                f"盘中动作(执行): {day_intraday_code}（{day_intraday_desc}）",
-                f"收盘动作(预案): {day_close_code}（{day_close_desc}）",
-                f"当前仓位: {pos_code}（{pos_desc}）",
+                f"Risk day: {'YES' if risk else 'NO'}",
+                f"Intraday action (executed): {day_intraday_code} ({day_intraday_desc})",
+                f"Close action (plan): {day_close_code} ({day_close_desc})",
+                f"Current position: {pos_code} ({pos_desc})",
             ]
             reason_lines = base_reasons + [action_reason]
             msg = build_msg(
-                "09:40 执行回报",
+                "09:40 Execution report",
                 symbol,
                 date_key,
                 decision_lines,
@@ -318,14 +321,14 @@ def main():
         if hhmm >= "16:05" and date_key not in sent["close"]:
             cc_ret = close_today / pc - 1.0
             bb = buyback(cc_ret) if risk else False
-            action_lines = ["策略参数改动: 无（沿用 config.json）"]
+            action_lines = ["Strategy config change: none (using config.json)"]
 
-            close_reason = "当前不是 paper 模式，收盘不执行交易。"
+            close_reason = "Current mode is non-paper, so no close execution."
             if not risk:
                 day_close_code = "NONE"
-                day_close_desc = "非风险日，无需买回"
-                action_lines.append("收盘动作: 无下单（非风险日）")
-                close_reason = "今天非风险日，白天本来就持仓，所以收盘无需买回。"
+                day_close_desc = "non-risk day, no buyback needed"
+                action_lines.append("Close action: no order (non-risk day)")
+                close_reason = "Non-risk day: daytime position was already held, so no buyback is needed."
             else:
                 if st is not None and st.shares == 0:
                     if bb:
@@ -333,47 +336,47 @@ def main():
                         save_state(args.state, st)
                         if bought > 0:
                             day_close_code = "BUYBACK"
-                            day_close_desc = "收盘买回，恢复隔夜持仓"
-                            action_lines.append(f"收盘动作: 买回 {bought} 股 @ {close_today:.2f}")
-                            close_reason = "今天是风险日，但收盘不弱（cc_ret>=0），按规则买回隔夜。"
+                            day_close_desc = "buy back at close, restore overnight hold"
+                            action_lines.append(f"Close action: bought back {bought} shares @ {close_today:.2f}")
+                            close_reason = "Risk day but close is not weak (cc_ret>=0), so buy back for overnight hold."
                         else:
                             day_close_code = "BUYBACK_SKIPPED"
-                            day_close_desc = "触发买回但未成交"
-                            action_lines.append("收盘动作: 触发买回但未成交（现金不足买 1 股）")
-                            close_reason = "已满足买回条件，但现金不足以买入 1 股。"
+                            day_close_desc = "buyback triggered but not filled"
+                            action_lines.append("Close action: buyback triggered but not filled (insufficient cash for 1 share)")
+                            close_reason = "Buyback condition passed, but cash was insufficient for 1 share."
                     else:
                         day_close_code = "STAY_FLAT"
-                        day_close_desc = "保持空仓过夜"
-                        action_lines.append("收盘动作: 不买回，保持空仓")
-                        close_reason = "今天是风险日且收盘偏弱（cc_ret<0），按规则空仓过夜。"
+                        day_close_desc = "stay flat overnight"
+                        action_lines.append("Close action: no buyback, stay flat")
+                        close_reason = "Risk day with weak close (cc_ret<0), so stay flat overnight by rule."
                 elif st is not None and st.shares > 0:
                     day_close_code = "NONE"
-                    day_close_desc = "当前已持仓，无需买回"
-                    action_lines.append("收盘动作: 无下单（已持仓）")
-                    close_reason = "当前已经持仓，所以不需要再买回。"
+                    day_close_desc = "already holding, no buyback needed"
+                    action_lines.append("Close action: no order (already holding)")
+                    close_reason = "Already holding a position, so no additional buyback is needed."
                 else:
                     day_close_code = "NONE"
-                    day_close_desc = "无可执行动作"
-                    action_lines.append("收盘动作: 无")
+                    day_close_desc = "no executable action"
+                    action_lines.append("Close action: none")
 
             pos_code, pos_desc = position_state(st)
             decision_lines = [
-                f"风险日: {'是' if risk else '否'}",
-                f"盘中动作: {day_intraday_code}（{day_intraday_desc}）",
-                f"收盘动作: {day_close_code}（{day_close_desc}）",
-                f"隔夜持仓: {pos_code}（{pos_desc}）",
+                f"Risk day: {'YES' if risk else 'NO'}",
+                f"Intraday action: {day_intraday_code} ({day_intraday_desc})",
+                f"Close action: {day_close_code} ({day_close_desc})",
+                f"Overnight position: {pos_code} ({pos_desc})",
             ]
             reason_lines = base_reasons + [
-                f"收盘相对昨收: {cc_ret*100:.3f}%",
+                f"Close vs prev_close: {cc_ret*100:.3f}%",
                 close_reason,
             ]
             if risk:
                 reason_lines.append(
-                    f"买回判定: {'cc_ret>=0，允许买回' if bb else 'cc_ret<0，不买回'}"
+                    f"Buyback check: {'cc_ret>=0, buyback allowed' if bb else 'cc_ret<0, no buyback'}"
                 )
 
             msg = build_msg(
-                "16:05 收盘决策",
+                "16:05 Close decision",
                 symbol,
                 date_key,
                 decision_lines,
