@@ -2,15 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import shutil
 import sys
 import time
 from datetime import date
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-import certifi
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,8 +18,19 @@ from os_base_agent.history import append as append_hist
 from os_base_agent.history import load as load_hist
 from os_base_agent.live import daily_points, fetch_intraday, prev_close
 from os_base_agent.market_day import is_nyse_trading_day
-from os_base_agent.notify_telegram import send as tg_send
 from os_base_agent.paper import buy_max, equity, load as load_state, save as save_state
+from os_base_agent.runtime import (
+    ensure_ca_bundle,
+    load_day_state,
+    load_last_close,
+    load_notify_state,
+    mark_sent,
+    pct_text,
+    safe_tg_send,
+    save_day_state,
+    save_last_close,
+    validate_config,
+)
 from os_base_agent.strategy import buyback, risk_day, thresholds
 from os_base_agent.tz import nearest_bar
 
@@ -30,107 +38,6 @@ NY = ZoneInfo("America/New_York")
 CLOSE_EXEC_AT = "15:59"
 CLOSE_EXEC_LATEST = "16:00"
 CLOSE_FINALIZE_AT = "16:05"
-
-
-def ensure_ca_bundle() -> None:
-    bundle = certifi.where()
-    if any(ord(ch) > 127 for ch in bundle):
-        target_dir = r"C:\os_agent_certs"
-        target_bundle = os.path.join(target_dir, "cacert.pem")
-        os.makedirs(target_dir, exist_ok=True)
-        if not os.path.exists(target_bundle):
-            shutil.copyfile(bundle, target_bundle)
-        bundle = target_bundle
-    os.environ["CURL_CA_BUNDLE"] = bundle
-    os.environ["SSL_CERT_FILE"] = bundle
-    os.environ["REQUESTS_CA_BUNDLE"] = bundle
-
-
-def pct_text(x: float) -> str:
-    return f"{x * 100:+.2f}%"
-
-
-def load_notify_state(path: str) -> dict[str, set[str]]:
-    state: dict[str, set[str]] = {"morning": set(), "exit": set(), "close": set()}
-    if not os.path.exists(path):
-        return state
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            raw = json.load(f)
-        for k in state:
-            vals = raw.get(k, [])
-            if isinstance(vals, list):
-                state[k] = {str(x) for x in vals}
-    except Exception:
-        return state
-    return state
-
-
-def save_notify_state(path: str, state: dict[str, set[str]]) -> None:
-    for k in state:
-        state[k] = set(sorted(state[k])[-90:])
-    out = {k: sorted(list(v)) for k, v in state.items()}
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(out, f, ensure_ascii=False, indent=2)
-
-
-def mark_sent(path: str, state: dict[str, set[str]], key: str, date_key: str) -> None:
-    state[key].add(date_key)
-    save_notify_state(path, state)
-
-
-def load_day_state(path: str) -> dict:
-    if not os.path.exists(path):
-        return {}
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def save_day_state(path: str, payload: dict) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-
-
-def load_last_close(path: str, symbol: str, today: date) -> tuple[float | None, str]:
-    if not os.path.exists(path):
-        return None, "missing_last_close_file"
-    try:
-        obj = json.load(open(path, "r", encoding="utf-8"))
-    except Exception:
-        return None, "invalid_last_close_file"
-
-    if str(obj.get("symbol", "")).upper() != symbol.upper():
-        return None, "last_close_symbol_mismatch"
-    if "close" not in obj:
-        return None, "last_close_missing_close"
-    try:
-        d = pd.to_datetime(str(obj.get("date"))).date()
-    except Exception:
-        return None, "last_close_invalid_date"
-    if d >= today:
-        return None, f"last_close_not_previous_day({d})"
-    try:
-        close_val = float(obj["close"])
-    except Exception:
-        return None, "last_close_invalid_close"
-    return close_val, f"local_last_close({d})"
-
-
-def save_last_close(path: str, symbol: str, date_key: str, close_today: float) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    payload = {
-        "symbol": symbol,
-        "date": date_key,
-        "close": float(close_today),
-        "updated_at": pd.Timestamp.now(tz=NY).isoformat(),
-    }
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
 
 
 def position_state(st) -> tuple[str, str]:
@@ -208,17 +115,6 @@ def build_close_msg(
     return "\n".join(lines)
 
 
-def safe_tg_send(tg_cfg: dict, msg: str) -> bool:
-    if not tg_cfg.get("enabled"):
-        return True
-    try:
-        tg_send(tg_cfg["bot_token"], tg_cfg["chat_id"], msg)
-        return True
-    except Exception as e:
-        print(f"[WARN] telegram send failed: {e}")
-        return False
-
-
 def _to_ny_index(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
     idx = pd.to_datetime(out.index, errors="coerce")
@@ -275,6 +171,7 @@ def main() -> None:
     args = ap.parse_args()
 
     cfg = json.load(open(args.config, "r", encoding="utf-8"))
+    validate_config(cfg)
     symbol = cfg["symbol"]
     hist_path = cfg["history_path"]
     mode = cfg["trade"]["mode"]

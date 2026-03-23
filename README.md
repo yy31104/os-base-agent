@@ -26,6 +26,7 @@ This project implements an OS_base-style daily workflow:
 - Late-run guards for morning/close windows
 - Persistent state files (`live_day_state`, `paper_state`, `last_close`)
 - Split workflows: `run_morning.py` and `run_close.py`
+- Runtime config validation before execution
 
 ## Project Structure
 ```text
@@ -70,6 +71,11 @@ Or use Windows Task Scheduler with:
 - `run_morning.bat`
 - `run_close.bat`
 
+## Tests
+```bash
+pytest -q
+```
+
 ## Backtest Reference (Local)
 On local 2-year QQQ minute data ending **2026-03-09**:
 - Strategy total return: **+88.4%**
@@ -78,6 +84,9 @@ On local 2-year QQQ minute data ending **2026-03-09**:
 - Buy & Hold max drawdown: **-22.3%**
 
 These values are environment/data dependent and provided as a reproducible local reference.
+
+## Data Source Note
+Live/near-live market data in this repository is pulled from `yfinance` for research/demo use. It is not production-grade market data infrastructure.
 
 ## Privacy Notes
 This public repo excludes private runtime artifacts by default:
