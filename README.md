@@ -110,4 +110,3 @@ Use `config.example.json` as template.
 
 ## Disclaimer
 For research/engineering demonstration only. Not investment advice.
-
